@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "kroppi",
+  "identifier": "lol.wagi.kroppi",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "kroppi",
+        "width": 1360,
+        "height": 860,
+        "minWidth": 560,
+        "minHeight": 420,
+        "backgroundColor": "#11111b",
+        "dragDropEnabled": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "rpm", "appimage"],
+    "category": "Video",
+    "shortDescription": "Trim and crop videos",
+    "longDescription": "A Linux app for trimming and cropping videos, with a terminal-style interface that also works with the mouse.",
+    "copyright": "Copyright (c) 2026 Wagi",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.png"],
+    "linux": {
+      "deb": {
+        "depends": ["ffmpeg", "gstreamer1.0-libav", "gstreamer1.0-plugins-good"],
+        "desktopTemplate": "../kroppi.desktop"
+      },
+      "rpm": {
+        "depends": ["ffmpeg", "gstreamer1-plugins-good"],
+        "desktopTemplate": "../kroppi.desktop"
+      },
+      "appimage": {
+        "bundleMediaFramework": true
+      }
+    }
+  }
+}

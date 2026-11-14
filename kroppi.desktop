@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=kroppi
+GenericName=Video Trimmer
+Comment=Trim and crop videos
+Exec=kroppi %f
+Icon=kroppi
+Terminal=false
+Categories=AudioVideo;Video;AudioVideoEditing;
+MimeType=video/mp4;video/webm;video/x-matroska;video/quicktime;video/x-msvideo;video/mpeg;video/ogg;video/3gpp;video/mp2t;video/x-flv;video/x-ms-wmv;
+Keywords=video;trim;cut;crop;aspect;
+StartupWMClass=kroppi

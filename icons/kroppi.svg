@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <rect x="4" y="4" width="120" height="120" rx="22" fill="#11111b"/>
+  <rect x="4.5" y="4.5" width="119" height="119" rx="21.5" fill="none" stroke="#45475a" stroke-width="3"/>
+  <!-- the full frame, dimmed -->
+  <rect x="20" y="26" width="88" height="56" rx="3" fill="#313244"/>
+  <!-- what's kept -->
+  <rect x="36" y="26" width="56" height="56" fill="#45475a"/>
+  <!-- crop corners -->
+  <path d="M36 40 V26 H50 M78 26 H92 V40 M92 68 V82 H78 M50 82 H36 V68" fill="none" stroke="#89b4fa" stroke-width="6" stroke-linecap="square"/>
+  <!-- trim bar -->
+  <rect x="20" y="96" width="88" height="6" rx="1" fill="#313244"/>
+  <rect x="44" y="96" width="40" height="6" fill="#89b4fa" opacity="0.45"/>
+  <rect x="40" y="91" width="6" height="16" fill="#89b4fa"/>
+  <rect x="82" y="91" width="6" height="16" fill="#89b4fa"/>
+</svg>

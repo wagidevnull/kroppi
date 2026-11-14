@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kroppi</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%2311111b'/><text x='8' y='12' font-family='monospace' font-size='11' text-anchor='middle' fill='%2389b4fa'>#</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+
+  <header class="titlebar">
+    <span class="brand">kroppi</span>
+    <span class="dim">trim &middot; crop</span>
+    <span id="file-label" class="file-label dim">no video loaded</span>
+    <span class="spacer"></span>
+    <button class="btn" data-action="open-video" title="Open a video">[ open video ]<span class="hk">v</span></button>
+    <button class="btn" data-action="help" title="Keyboard shortcuts">[ help ]<span class="hk">?</span></button>
+  </header>
+
+  <main class="workspace">
+    <!-- ====================================================== preview -->
+    <section class="box preview-box">
+      <div class="box-title"><span id="preview-title">crop</span><span id="preview-info" class="dim"></span></div>
+      <div id="stage" class="stage">
+        <canvas id="preview"></canvas>
+        <div id="empty" class="empty">
+<pre class="logo"> _                             _
+| | __ _ __   ___   _ __   _ __ (_)
+| |/ /| '__| / _ \ | '_ \ | '_ \| |
+|   < | |   | (_) || |_) || |_) | |
+|_|\_\|_|    \___/ | .__/ | .__/|_|
+                   |_|    |_|</pre>
+          <p>drop a video here, or press <kbd>v</kbd></p>
+          <p class="dim">mp4 / mkv / webm / mov and more &middot; nothing is uploaded, it all stays on your computer</p>
+          <p id="no-ffmpeg" class="warn hidden">ffmpeg isn't installed: kroppi needs it to read and save videos</p>
+        </div>
+      </div>
+      <div id="crop-bar" class="crop-bar">
+        <span class="seg" id="crop-aspect" title="aspect ratio (keys 1-8)">
+          <button data-aspect="free">free</button><button data-aspect="orig">orig</button><button data-aspect="1.7778">16:9</button><button data-aspect="1.3333">4:3</button><button data-aspect="1">1:1</button><button data-aspect="0.8">4:5</button><button data-aspect="0.5625">9:16</button><button data-aspect="2.3333">21:9</button>
+        </span>
+        <span class="dim">x</span><input class="num" id="crop-x" type="number" min="0">
+        <span class="dim">y</span><input class="num" id="crop-y" type="number" min="0">
+        <span class="dim">w</span><input class="num" id="crop-w" type="number" min="16">
+        <span class="dim">h</span><input class="num" id="crop-h" type="number" min="16">
+        <button class="btn small" data-action="crop-center" title="Center the crop">[ center ]</button>
+        <button class="btn small" data-action="crop-reset" title="No crop (0)">[ reset ]<span class="hk">0</span></button>
+        <span class="spacer"></span>
+        <span class="seg" id="view-seg" title="Show the whole frame to edit the crop, or just the result (c)"><button data-view="edit">edit</button><button data-view="result">result</button></span><span class="hk" title="press c to switch">c</span>
+      </div>
+    </section>
+
+    <!-- ====================================================== timeline -->
+    <section class="box timeline-box">
+      <div class="box-title"><span>trim</span><span id="tl-info" class="dim"></span></div>
+      <div class="transport">
+        <button class="btn" data-action="frame-back" title="Back one frame (&lt;)">[ &lt; ]</button>
+        <button class="btn" id="play-btn" data-action="play" title="Play the selection (space)">[ &#x25B6; play ]</button>
+        <button class="btn" data-action="frame-fwd" title="Forward one frame (&gt;)">[ &gt; ]</button>
+        <label class="field" title="Playhead: type seconds (12.5) or m:ss.cc (1:02.5)">
+          <span class="dim">@</span><input id="t-pos" class="time" type="text" value="0:00.00">
+        </label>
+        <span class="sep">&#x2502;</span>
+        <label class="field"><span class="dim">start</span><input id="t-start" class="time" type="text"></label>
+        <button class="btn small" data-action="set-start" title="Set start to the playhead">[ set ]<span class="hk">i</span></button>
+        <label class="field"><span class="dim">end</span><input id="t-end" class="time" type="text"></label>
+        <button class="btn small" data-action="set-end" title="Set end to the playhead">[ set ]<span class="hk">o</span></button>
+        <label class="field"><span class="dim">length</span><input id="t-dur" class="time" type="text"></label>
+        <button class="btn small" data-action="trim-reset" title="Keep the whole video">[ all ]</button>
+      </div>
+      <div id="timeline" class="timeline">
+        <div class="tl-ruler" id="tl-ruler"></div>
+        <div class="tl-track">
+          <div class="tl-ticks" id="tl-ticks"></div>
+          <div class="tl-range" id="tl-range"></div>
+          <div class="tl-handle" id="tl-h-start" title="drag to set start"></div>
+          <div class="tl-handle" id="tl-h-end" title="drag to set end"></div>
+          <div class="tl-playhead" id="tl-playhead"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================== sidebar -->
+    <aside class="sidebar">
+      <section class="box">
+        <div class="box-title"><span>output</span><span id="out-info" class="dim"></span></div>
+        <div class="row">
+          <span class="label">mode</span>
+          <span class="seg" id="mode-seg"><button data-mode="exact" title="Re-encode: cuts on the exact frame">exact</button><button data-mode="fast" title="Copy: instant and lossless, but cuts snap to keyframes">fast</button></span><span class="hk" title="press f to switch">f</span>
+        </div>
+        <div class="row"><span class="label"></span><span id="mode-hint" class="dim hint"></span></div>
+        <div class="row">
+          <span class="label">quality</span>
+          <span class="seg" id="quality-seg"><button data-quality="high">high</button><button data-quality="medium">medium</button><button data-quality="small">small</button></span>
+        </div>
+        <div class="row">
+          <span class="label">audio</span>
+          <label class="check"><input type="checkbox" id="mute"> mute</label><span class="hk" title="press m">m</span>
+          <span id="audio-info" class="dim"></span>
+        </div>
+        <div class="hr"></div>
+        <dl class="summary" id="summary">
+          <dt>size</dt><dd id="sum-size">-</dd>
+          <dt>length</dt><dd id="sum-len">-</dd>
+          <dt>format</dt><dd id="sum-fmt">-</dd>
+        </dl>
+        <button class="btn primary wide" data-action="export" title="Save the trimmed and cropped video">[ export ]<span class="hk">e</span></button>
+      </section>
+
+      <section class="box">
+        <div class="box-title"><span>source</span><span></span></div>
+        <dl class="summary" id="source">
+          <dt>file</dt><dd id="src-name" class="ellip">-</dd>
+          <dt>size</dt><dd id="src-size">-</dd>
+          <dt>length</dt><dd id="src-len">-</dd>
+          <dt>video</dt><dd id="src-video">-</dd>
+          <dt>audio</dt><dd id="src-audio">-</dd>
+        </dl>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="keys" id="keys">
+    <span><kbd>spc</kbd>play</span><span><kbd>&lt; &gt;</kbd>frame</span><span><kbd>j l</kbd>&plusmn;1s</span>
+    <span><kbd>i o</kbd>start/end</span><span><kbd>1-8</kbd>aspect</span><span><kbd>c</kbd>edit/result</span>
+    <span><kbd>&larr;&uarr;&darr;&rarr;</kbd>move crop</span><span><kbd>f</kbd>fast/exact</span><span><kbd>e</kbd>export</span><span><kbd>?</kbd>help</span>
+    <span class="spacer"></span><span id="status" class="dim"></span>
+  </footer>
+</div>
+
+<!-- the decoder -->
+<video id="video" playsinline preload="auto"></video>
+
+<!-- ====================================================== modals -->
+<div id="modal-export" class="modal hidden">
+  <div class="box modal-box">
+    <div class="box-title"><span id="exp-title">exporting</span><span class="dim">esc to cancel</span></div>
+    <div id="exp-progress">
+      <pre id="exp-bar" class="bar"></pre>
+      <p id="exp-stage" class="dim"></p>
+      <button class="btn" data-action="export-cancel">[ cancel ]<span class="hk">esc</span></button>
+    </div>
+    <div id="exp-result" class="hidden">
+      <p id="exp-meta"></p>
+      <p id="exp-path" class="dim path"></p>
+      <p id="exp-note" class="warn hidden"></p>
+      <div class="row center">
+        <button class="btn primary" data-action="reveal">[ &#x23CE; show in folder ]</button>
+        <button class="btn" data-action="export-close">[ back to editing ]<span class="hk">esc</span></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="modal-quit" class="modal hidden">
+  <div class="box modal-box">
+    <div class="box-title"><span>quit?</span><span></span></div>
+    <p>You haven't exported anything from this video yet.</p>
+    <p class="dim">Quit anyway and lose your edits?</p>
+    <div class="row center">
+      <button class="btn danger" data-action="quit-yes">[ quit ]<span class="hk">q</span></button>
+      <button class="btn primary" data-action="quit-no">[ keep editing ]<span class="hk">esc</span></button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-help" class="modal hidden">
+  <div class="box modal-box help">
+    <div class="box-title"><span>keyboard</span><span class="dim">esc to close</span></div>
+    <div class="help-cols">
+      <dl>
+        <dt>trim</dt>
+        <dd><kbd>space</kbd> play / pause the selection</dd>
+        <dd><kbd>&lt;</kbd> <kbd>&gt;</kbd> (or <kbd>,</kbd> <kbd>.</kbd>) step one frame</dd>
+        <dd><kbd>j</kbd> <kbd>l</kbd> step one second</dd>
+        <dd><kbd>i</kbd> / <kbd>o</kbd> set start / end at the playhead</dd>
+        <dd>drag the top edge of the selection to slide it &middot; <kbd>{</kbd> <kbd>}</kbd> nudge it a frame</dd>
+        <dd><kbd>home</kbd> / <kbd>end</kbd> jump to start / end</dd>
+        <dd>type times as <code>12.5</code> or <code>1:02.5</code></dd>
+        <dt>output</dt>
+        <dd><kbd>f</kbd> switch between <em>exact</em> (re-encode) and <em>fast</em> (lossless copy, keyframe cuts)</dd>
+        <dd><kbd>m</kbd> mute &middot; <kbd>e</kbd> export &middot; <kbd>v</kbd> open another video</dd>
+      </dl>
+      <dl>
+        <dt>crop</dt>
+        <dd>drag on the video to draw a crop &middot; drag inside to move it &middot; corners resize</dd>
+        <dd><kbd>1</kbd>&ndash;<kbd>8</kbd> free, original, 16:9, 4:3, 1:1, 4:5, 9:16, 21:9</dd>
+        <dd><kbd>&larr;&uarr;&darr;&rarr;</kbd> move the crop (<kbd>shift</kbd> = 10&times;)</dd>
+        <dd><kbd>+</kbd> / <kbd>-</kbd> make the crop bigger / smaller</dd>
+        <dd><kbd>0</kbd> no crop &middot; <kbd>x</kbd> center it</dd>
+        <dd><kbd>c</kbd> switch between editing and seeing the result</dd>
+        <dd>cropping always re-encodes, so <em>fast</em> mode turns off while there's a crop</dd>
+      </dl>
+    </div>
+    <p class="credit">made with <span class="heart">&#x2661;</span> in vancouver by wagi</p>
+  </div>
+</div>
+
+<script src="js/app.js"></script>
+</body>
+</html>
