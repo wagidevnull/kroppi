@@ -21,7 +21,7 @@ jobs:
             arch: aarch64
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -43,7 +43,7 @@ jobs:
           cp $B/bundle/deb/*.deb $B/bundle/rpm/*.rpm dist/
           cp $B/bundle/appimage/*.AppImage dist/ || echo "no AppImage built"
           cd dist && for f in *; do sha256sum "$f" > "$f.sha256"; done && ls -la
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: kroppi-${{ matrix.arch }}
           path: dist/*
@@ -53,7 +53,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
