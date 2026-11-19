@@ -269,6 +269,23 @@ async fn pick_save(app: AppHandle, suggested: String) -> Res<Option<String>> {
     .map_err(|e| e.to_string())
 }
 
+/// Are these the same file on disk? Compares device and inode, so another
+/// path to the same file (a symlink, "..", a hard link) counts too. A path
+/// that doesn't exist yet is never the same file.
+fn same_file(a: &Path, b: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (fs::metadata(a), fs::metadata(b)) {
+        (Ok(x), Ok(y)) => x.dev() == y.dev() && x.ino() == y.ino(),
+        _ => false,
+    }
+}
+
+/// Would saving to `output` overwrite the video being read?
+#[tauri::command]
+fn is_same_file(input: String, output: String) -> bool {
+    same_file(Path::new(&input), Path::new(&output))
+}
+
 #[derive(Serialize)]
 struct Exported {
     path: String,
@@ -283,6 +300,10 @@ async fn export(app: AppHandle, opts: ffmpeg::ExportOpts, on_progress: Channel<f
         let state = app.state::<AppState>();
         let _busy = Busy::take(&state.busy)?;
         let out = opts.output.clone();
+        // the window asks first (is_same_file); this is the backstop
+        if same_file(&opts.input, &out) {
+            return Err("that's the video kroppi is reading: pick a different file".into());
+        }
         let dir = out.parent().ok_or("bad output path")?;
         let name = out.file_name().ok_or("bad output path")?.to_string_lossy();
         // write next to the target, then move into place: no half-written files
@@ -521,6 +542,7 @@ fn main() {
             open_video,
             make_proxy,
             pick_save,
+            is_same_file,
             export,
             cancel,
             reveal,
@@ -538,6 +560,7 @@ fn main() {
         open_video,
         make_proxy,
         pick_save,
+        is_same_file,
         export,
         cancel,
         reveal,
@@ -558,4 +581,28 @@ fn main() {
             app.state::<AppState>().proxy.lock().unwrap().take();
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn same_file_sees_through_other_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.mp4");
+        let b = dir.path().join("b.mp4");
+        fs::write(&a, "x").unwrap();
+        fs::write(&b, "x").unwrap();
+        let link = dir.path().join("link.mp4");
+        std::os::unix::fs::symlink(&a, &link).unwrap();
+        let dotted = dir.path().join("sub/../a.mp4");
+        fs::create_dir(dir.path().join("sub")).unwrap();
+
+        assert!(same_file(&a, &a));
+        assert!(same_file(&a, &link), "a symlink to the open video");
+        assert!(same_file(&a, &dotted), "a path with ..");
+        assert!(!same_file(&a, &b), "a different file with the same contents");
+        assert!(!same_file(&a, &dir.path().join("new.mp4")), "a file that doesn't exist yet");
+    }
 }

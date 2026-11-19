@@ -587,7 +587,12 @@
       output = await invoke('pick_save', { suggested: suggestedPath() });
     } catch (e) { status('save dialog failed: ' + errText(e)); return; }
     if (!output) return;
-    if (output === S.probe.path) { status("pick a different file: kroppi won't overwrite the video it's reading"); return; }
+    // compares the files, not the paths: a symlink to the open video counts too
+    if (output === S.probe.path || await invoke('is_same_file', { input: S.probe.path, output }).catch(() => false)) {
+      $('#same-name').textContent = basename(output);
+      $('#modal-same').classList.remove('hidden');
+      return;
+    }
 
     S.busy = true;
     const job = (S.job = { cancelled: false });
@@ -817,6 +822,8 @@
     'export-close': closeExport,
     'quit-yes': () => { $('#modal-quit').classList.add('hidden'); invoke('quit').catch(() => {}); },
     'quit-no': () => $('#modal-quit').classList.add('hidden'),
+    'same-retry': () => { $('#modal-same').classList.add('hidden'); exportVideo(); },
+    'same-close': () => $('#modal-same').classList.add('hidden'),
     reveal: () => { if (S.lastOut) invoke('reveal', { path: S.lastOut }).catch(() => {}); },
   };
   document.addEventListener('click', (e) => {
@@ -840,6 +847,7 @@
     if (e.key === 'Escape') {
       if (typing) { e.target.blur(); return; }
       if (!$('#modal-quit').classList.contains('hidden')) return $('#modal-quit').classList.add('hidden');
+      if (!$('#modal-same').classList.contains('hidden')) return ACTIONS['same-close']();
       if (!$('#modal-export').classList.contains('hidden')) return closeExport();
       if (!$('#modal-help').classList.contains('hidden')) return $('#modal-help').classList.add('hidden');
       if (S.view === 'result') return setView('edit');
@@ -849,6 +857,11 @@
     if (!$('#modal-quit').classList.contains('hidden')) {
       if (e.key === 'q' || e.key === 'y' || e.key === 'Enter') ACTIONS['quit-yes']();
       else if (e.key === 'n') ACTIONS['quit-no']();
+      e.preventDefault();
+      return;
+    }
+    if (!$('#modal-same').classList.contains('hidden')) {
+      if (e.key === 'Enter') ACTIONS['same-retry']();
       e.preventDefault();
       return;
     }
