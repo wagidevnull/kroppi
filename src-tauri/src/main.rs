@@ -152,20 +152,54 @@ async fn open_video(state: State<'_, AppState>, path: String) -> Res<Opened> {
     })
 }
 
-/// Make a small mp4 copy of a video the window can't play, for the preview.
-/// Exports always read the original.
+/// Where preview copies go. Not /tmp: that is often RAM (tmpfs), and a remux
+/// is as big as the original.
+fn cache_dir() -> PathBuf {
+    let base = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
+        .unwrap_or_else(std::env::temp_dir);
+    base.join("kroppi")
+}
+
+/// Make a copy of a video the window can't play, for the preview. `kind` is
+/// "remux" (copy the first video and audio track, dropping subtitles and the
+/// rest: fast) or "encode" (a small mp4: slow, but plays anything ffmpeg
+/// reads). Exports always read the original.
 #[tauri::command]
-async fn make_proxy(app: AppHandle, path: String, duration: f64, on_progress: Channel<f64>) -> Res<String> {
+async fn make_proxy(
+    app: AppHandle,
+    path: String,
+    duration: f64,
+    kind: String,
+    on_progress: Channel<f64>,
+) -> Res<String> {
     let a = app.clone();
     let out = tauri::async_runtime::spawn_blocking(move || -> Res<PathBuf> {
         let state = a.state::<AppState>();
         let _busy = Busy::take(&state.busy)?;
+        // the previous copy is deleted (its TempDir dropped) before making this one
+        state.proxy.lock().unwrap().take();
+        let base = cache_dir();
+        fs::create_dir_all(&base).map_err(|e| format!("couldn't make {}: {e}", base.display()))?;
+        // the pid in the name tells sweep_stale_previews whose copy it is
         let dir = tempfile::Builder::new()
-            .prefix("kroppi-")
-            .tempdir()
+            .prefix(&format!("preview-{}-", std::process::id()))
+            .tempdir_in(&base)
             .map_err(|e| e.to_string())?;
-        let out = dir.path().join("preview.mp4");
-        let args = ffmpeg::proxy_args(Path::new(&path), &out);
+        let (out, args) = match kind.as_str() {
+            "remux" => {
+                let out = dir.path().join("preview.mkv");
+                let args = ffmpeg::remux_args(Path::new(&path), &out);
+                (out, args)
+            }
+            _ => {
+                let out = dir.path().join("preview.mp4");
+                let args = ffmpeg::proxy_args(Path::new(&path), &out);
+                (out, args)
+            }
+        };
         ffmpeg::run(&args, duration, &state.child, throttled(&on_progress))?;
         *state.proxy.lock().unwrap() = Some(dir);
         Ok(out)
@@ -335,7 +369,80 @@ fn autotest_exit(code: i32) {
 
 // ------------------------------------------------------------------ main
 
+/// GStreamer's VA-API decoders (gstreamer1.0-plugins-bad) hand WebKitGTK GPU
+/// frames it can't read on some drivers (Intel HD 630 on Debian 13: "DMABuf
+/// caps negotiated without the mandatory support of VideoMeta"), so the
+/// preview shows noise or nothing. Ranking them out makes GStreamer use the
+/// software decoders, which are plenty for a preview. A rank the user set in
+/// GST_PLUGIN_FEATURE_RANK comes later in the list, so it still wins.
+const DEMOTED_DECODERS: &[&str] = &[
+    "vah264dec", "vah265dec", "vavp8dec", "vavp9dec", "vaav1dec", "vampeg2dec", "vajpegdec",
+    "vaapidecodebin", "vaapih264dec", "vaapih265dec", "vaapivp8dec", "vaapivp9dec", "vaapiav1dec",
+    "vaapimpeg2dec",
+];
+
+fn demote_hw_decoders() {
+    if std::env::var_os("KROPPI_HW_DECODE").is_some() {
+        return;
+    }
+    let mut ranks: Vec<String> = DEMOTED_DECODERS.iter().map(|d| format!("{d}:NONE")).collect();
+    if let Ok(user) = std::env::var("GST_PLUGIN_FEATURE_RANK")
+        && !user.trim().is_empty()
+    {
+        ranks.push(user);
+    }
+    // SAFETY: called first thing in main, before any other thread exists.
+    unsafe { std::env::set_var("GST_PLUGIN_FEATURE_RANK", ranks.join(",")) };
+}
+
+/// Delete preview copies left by a kroppi that is no longer running (killed
+/// with -9, a crash, power loss). Folders are named preview-<pid>-<random>;
+/// a copy whose kroppi is still running is kept.
+fn sweep_stale_previews() {
+    let Ok(entries) = fs::read_dir(cache_dir()) else { return };
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let Some(rest) = name.strip_prefix("preview-") else { continue };
+        let alive = rest
+            .split('-')
+            .next()
+            .and_then(|pid| pid.parse::<u32>().ok())
+            .is_some_and(|pid| {
+                fs::read_to_string(format!("/proc/{pid}/comm"))
+                    .is_ok_and(|comm| comm.trim() == "kroppi")
+            });
+        if !alive {
+            let _ = fs::remove_dir_all(e.path());
+        }
+    }
+}
+
+/// On SIGTERM/SIGINT/SIGHUP (logout, shutdown, Ctrl+C), stop ffmpeg and
+/// delete the preview copy before exiting: Tauri's exit event doesn't run.
+fn clean_up_on_signals(app: AppHandle) {
+    use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
+    let mut signals = match signal_hook::iterator::Signals::new([SIGTERM, SIGINT, SIGHUP]) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("kroppi: couldn't watch for signals: {e}");
+            return;
+        }
+    };
+    std::thread::spawn(move || {
+        if let Some(sig) = signals.forever().next() {
+            let state = app.state::<AppState>();
+            if let Some(mut c) = state.child.lock().unwrap().take() {
+                let _ = c.kill();
+                let _ = c.wait();
+            }
+            state.proxy.lock().unwrap().take();
+            std::process::exit(128 + sig);
+        }
+    });
+}
+
 fn main() {
+    demote_hw_decoders();
     let mut initial = None;
     for arg in std::env::args().skip(1) {
         match arg.as_str() {
@@ -370,8 +477,14 @@ fn main() {
         }
     }
 
+    std::thread::spawn(sweep_stale_previews);
+
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            clean_up_on_signals(app.handle().clone());
+            Ok(())
+        })
         .manage(AppState {
             initial,
             server: serve::Server::start()
@@ -432,8 +545,17 @@ fn main() {
         quit
     ]);
 
-    if let Err(e) = builder.run(tauri::generate_context!()) {
-        eprintln!("kroppi: couldn't start: {e}");
-        std::process::exit(1);
-    }
+    let app = match builder.build(tauri::generate_context!()) {
+        Ok(app) => app,
+        Err(e) => {
+            eprintln!("kroppi: couldn't start: {e}");
+            std::process::exit(1);
+        }
+    };
+    app.run(|app, event| {
+        // exit() doesn't drop the app state: delete the preview copy here
+        if let tauri::RunEvent::Exit = event {
+            app.state::<AppState>().proxy.lock().unwrap().take();
+        }
+    });
 }

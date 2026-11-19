@@ -52,7 +52,10 @@ elif command -v zypper >/dev/null; then
     pm="sudo zypper install -y"
 fi
 
-have_webkit() { ldconfig -p 2>/dev/null | grep -q 'libwebkit2gtk-4\.1\.so\.0'; }
+have_webkit() {
+    # Debian keeps ldconfig in /sbin, which isn't on a normal user's PATH
+    { ldconfig -p 2>/dev/null || /sbin/ldconfig -p 2>/dev/null; } | grep -q 'libwebkit2gtk-4\.1\.so\.0'
+}
 have_h264() { ! command -v gst-inspect-1.0 >/dev/null || gst-inspect-1.0 avdec_h264 >/dev/null 2>&1; }
 
 have_ffmpeg() { command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null; }

@@ -88,20 +88,41 @@
   }
 
   // ------------------------------------------------------------ video loading
+  // How long a video may take to show its first frame. WebKitGTK can stall
+  // without firing 'error' (an mkv with subtitles waits for subtitle data
+  // forever), so a load that takes longer counts as failed.
+  const LOAD_TIMEOUT_MS = 10000;
+
   function openVideoUrl(url) {
     return new Promise((resolve, reject) => {
-      const done = (ok) => () => {
+      let timer = 0;
+      const finish = (err) => {
+        clearTimeout(timer);
         video.removeEventListener('loadeddata', onOk);
         video.removeEventListener('error', onErr);
-        if (ok && video.videoWidth > 0) resolve();
-        else reject(new Error(ok ? 'no video track' : 'cannot decode'));
+        if (!err) { resolve(); return; }
+        // stop the stalled player so it lets go of the file and the server
+        video.removeAttribute('src');
+        video.load();
+        reject(err);
       };
-      const onOk = done(true), onErr = done(false);
+      const onOk = () => finish(video.videoWidth > 0 ? null : new Error('no video track'));
+      const onErr = () => finish(new Error('cannot decode'));
       video.addEventListener('loadeddata', onOk);
       video.addEventListener('error', onErr);
+      timer = setTimeout(() => finish(new Error('timed out')), LOAD_TIMEOUT_MS);
       video.src = url;
       video.load();
     });
+  }
+
+  // Make a preview copy (see make_proxy in main.rs) and open it.
+  async function openProxy(probe, kind, label) {
+    const onProgress = new TAURI.core.Channel();
+    onProgress.onmessage = (p) => status(`${label} … ${Math.round(p * 100)}%`, true);
+    status(label + ' …', true);
+    const url = await invoke('make_proxy', { path: probe.path, duration: probe.duration, kind, onProgress });
+    await openVideoUrl(url);
   }
 
   async function loadPath(path) {
@@ -117,17 +138,21 @@
       status("can't open " + name + ': ' + errText(e), true);
       return;
     }
-    try {
-      await openVideoUrl(probe.url);
-    } catch (_) {
-      // the window can't play this one: preview a small copy instead
+    // Try the original, then a remux without subtitles (fast: streams copied),
+    // then a small re-encoded copy (slow, plays anything ffmpeg reads).
+    // Files with subtitles skip the original: the window stalls on those.
+    let opened = false;
+    if (!probe.subtitles) {
+      try { await openVideoUrl(probe.url); opened = true; } catch (_) { /* try a copy */ }
+    }
+    if (!opened) {
+      S.busy = true;
       try {
-        S.busy = true;
-        const onProgress = new TAURI.core.Channel();
-        onProgress.onmessage = (p) => status(`making a preview copy of ${name} … ${Math.round(p * 100)}%`, true);
-        status(`making a preview copy of ${name} …`, true);
-        const url = await invoke('make_proxy', { path: probe.path, duration: probe.duration, onProgress });
-        await openVideoUrl(url);
+        try {
+          await openProxy(probe, 'remux', `preparing ${name}`);
+        } catch (_) {
+          await openProxy(probe, 'encode', `making a preview copy of ${name}`);
+        }
       } catch (e) {
         status("can't preview " + name + ': ' + errText(e), true);
         return;

@@ -17,6 +17,8 @@ tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3"
+# delete the preview copy when kroppi is killed (logout, shutdown, Ctrl+C)
+signal-hook = "0.3"
 
 [features]
 # Lets a test script drive the app (see tests/). Never enabled in releases.

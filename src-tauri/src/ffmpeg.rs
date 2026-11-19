@@ -27,6 +27,10 @@ pub struct Probe {
     pub vcodec: String,
     pub acodec: Option<String>,
     pub rotation: i32,
+    /// Has subtitle tracks. WebKitGTK stalls on these (it waits for subtitle
+    /// data before it shows the first frame), so the window gets a remux
+    /// without them instead.
+    pub subtitles: bool,
     /// Container kroppi will write by default: mp4, mov, mkv or webm.
     pub container: String,
 }
@@ -120,6 +124,7 @@ pub fn parse_probe(path: &Path, size: u64, json: &Value) -> Result<Probe, String
         vcodec: v["codec_name"].as_str().unwrap_or("?").into(),
         acodec: a.and_then(|a| a["codec_name"].as_str()).map(String::from),
         rotation,
+        subtitles: streams.iter().any(|s| s["codec_type"] == "subtitle"),
     })
 }
 
@@ -311,6 +316,26 @@ pub fn build_args(o: &ExportOpts, part: &Path) -> Result<Plan, String> {
         mode,
         note,
     })
+}
+
+/// The arguments for a copy of the video with only its first video and audio
+/// track, streams copied as they are: as fast as the disk, and the window
+/// plays it when the original's extra tracks (subtitles) stall it.
+/// Matroska takes any codec, so the copy never fails on the container.
+pub fn remux_args(input: &Path, out: &Path) -> Vec<String> {
+    let mut a: Vec<String> = ["-v", "error", "-nostdin", "-y", "-i"]
+        .map(String::from)
+        .to_vec();
+    a.push(input.to_string_lossy().into_owned());
+    a.extend(
+        [
+            "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy", "-sn", "-dn", "-progress", "pipe:1",
+            "-nostats", "-f", "matroska",
+        ]
+        .map(String::from),
+    );
+    a.push(out.to_string_lossy().into_owned());
+    a
 }
 
 /// The arguments for a small preview copy of a video the window can't play.
@@ -556,6 +581,27 @@ mod tests {
         assert_eq!(p.acodec.as_deref(), Some("aac"));
         assert_eq!(p.container, "mp4");
         assert_eq!(p.name, "phone.mp4");
+        assert!(!p.subtitles);
+    }
+
+    #[test]
+    fn probe_json_with_subtitles() {
+        let j = json!({
+            "streams": [
+                {"codec_type": "video", "codec_name": "h264", "width": 1920, "height": 960},
+                {"codec_type": "audio", "codec_name": "eac3"},
+                {"codec_type": "subtitle", "codec_name": "subrip"}
+            ],
+            "format": {"duration": "60", "format_name": "matroska,webm"}
+        });
+        assert!(parse_probe(Path::new("/x/ep.mkv"), 1, &j).unwrap().subtitles);
+    }
+
+    #[test]
+    fn remux_keeps_one_video_and_audio_track_copied() {
+        let a = remux_args(Path::new("/v/in.mkv"), Path::new("/c/preview.mkv"));
+        assert!(has(&a, &["-map", "0:v:0", "-map", "0:a:0?", "-c", "copy", "-sn"]));
+        assert!(has(&a, &["-f", "matroska", "/c/preview.mkv"]));
     }
 
     #[test]
